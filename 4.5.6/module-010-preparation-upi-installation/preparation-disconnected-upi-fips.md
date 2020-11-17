@@ -1,17 +1,5 @@
 # Module01:
 
-# Introduction:
-
-Starting with version 4.3, you can install an OpenShift Container Platform cluster that uses FIPS Validated / Modules in Process cryptographic libraries.
-
-For the Red Hat Enterprise Linux CoreOS (RHCOS) machines in your cluster, this change is applied when the machines are deployed based on the status of an option in the `install-config.yaml` file, which governs the cluster options that a user can change during cluster deployment. With Red Hat Enterprise Linux machines, you must enable FIPS mode when you install the operating system on the machines that you plan to use as worker machines. These configuration methods ensure that your cluster meet the requirements of a FIPS compliance audit: only FIPS Validated / Modules in Process cryptography packages are enabled before the initial system boot.
-
-Because FIPS must be enabled before the operating system that your cluster uses boots for the first time, you cannot enable FIPS after you deploy a cluster.
-
-
-
-More  Information about FIPS and OpenShift can be found here: [Support for FIPS cryptography | Installing | OpenShift Container Platform 4.3](https://docs.openshift.com/container-platform/4.3/installing/installing-fips.html)
-
 # Preparation of the installation Environment
 
 ### Preface:
@@ -578,51 +566,187 @@ Now we need to add the self created certificate to the the local trust:
 
 Now we have created all of our bastion. the next step is to prepare the installation from the Openshift perspective
 
-## Configure OpenShift installer and CLI binary:
+## Configure OpenShift installer and CLI binary for disconnected Installation:
 
 From now on, unless otherwise stated, all steps will be performed on bastion.hX.rhaw.io
 
 We need to login with ssh and the username and password provided through the instructor:
 
 ```
-ssh root@bastion.hX.rhaw.io
+ssh root@bastion
 ```
 
-First of all we need to download and install the Openshift client and the installer.
+First of all we need to download a copy of our pull-secret in text file format. This file needs to be safed on our bastion node in /root.
 
-> Important: Please be sure that you downloaded the correct versions. If you have a version mismatch ???
+Then we need to convert this file into json format. For this we need the jq binary. This can be installed over rpm. 
 
-```
-[root@bastion ~]# cd /root
-```
+Earlier we created an username and password for our registry.
 
-```
-[root@bastion ~]# wget https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.5.6/openshift-install-linux-4.5.6.tar.gz
-```
+Now we need to create an  base64-encoded user name and password or token for our mirror registry.
 
 ```
-[root@bastion ~]# wget https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.5.6/openshift-client-linux-4.5.6.tar.gz
+[root@bastion ~]# echo -n '<user_name>:<password>' | base64 -w0
 ```
 
-```
-[root@bastion ~]# tar -xvf openshift-install-linux-4.5.6.tar.gz
-```
+The output when we use username=student and password=redhat should look similar to this one:
 
 ```
-[root@bastion ~]# tar -xvf openshift-client-linux-4.5.6.tar.gz
+[root@bastion ~]# BGVtbYk3ZHAtqXs=
 ```
 
+Then we need to make a copy of our downloaded pull-secret.txt  into json format:
+
 ```
-[root@bastion ~]# cp -v oc kubectl openshift-install /usr/local/bin/
+cat ./pull-secret.text | jq .  > /root/pull-secret.json
 ```
 
-Now we need to create a SSH key pair to access to use later to access the CoreOS nodes
+After we have done this we need to modify the pull-secret.json with the informations of our new mirrored registry:
+
+The base file looks similar to this:
+
+```
+{
+  "auths": {
+    "cloud.openshift.com": {
+      "auth": "b3BlbnNo...",
+      "email": "you@example.com"
+    },
+    "quay.io": {
+      "auth": "b3BlbnNo...",
+      "email": "you@example.com"
+    },
+    "registry.connect.redhat.com": {
+      "auth": "NTE3Njg5Nj...",
+      "email": "you@example.com"
+    },
+    "registry.redhat.io": {
+      "auth": "NTE3Njg5Nj...",
+      "email": "you@example.com"
+    }
+  }
+}
+```
+
+Now we need to add our registry on top of this file so it looks like this:
+
+```
+{
+  "auths": {
+    "bastion:5000": {
+      "auth": "BGVtbYk3ZHAtqXs=",
+      "email": ""you@example.com"
+    },
+    "cloud.openshift.com": {
+      "auth": "b3BlbnNo...",
+      "email": "you@example.com"
+    },
+    "quay.io": {
+      "auth": "b3BlbnNo...",
+      "email": "you@example.com"
+    },
+    "registry.connect.redhat.com": {
+      "auth": "NTE3Njg5Nj...",
+      "email": "you@example.com"
+    },
+    "registry.redhat.io": {
+      "auth": "NTE3Njg5Nj...",
+      "email": "you@example.com"
+    }
+  }
+}
+```
+
+Please change the values for bastion:5000 like Hostname/Port/auth/email accordingly.
+
+For mirroring all the images we need now setup some environment variables:
+
+Export the release version:
+
+```
+[root@bastion ~]# export OCP_RELEASE=4.5.6
+```
+
+Export the local registry name and host port:
+
+```
+[root@bastion ~]# export LOCAL_REGISTRY='bastion:5000'
+```
+
+Export the local repository name:
+
+```
+[root@bastion ~]# export LOCAL_REPOSITORY='ocp4/openshift4'
+```
+
+Export the name of the repository to mirror:
+
+```
+[root@bastion ~]# export PRODUCT_REPO='openshift-release-dev'
+```
+
+For a production release, you must specify `openshift-release-dev`.
+
+Export the path to your registry pull secret:
+
+```
+ [root@bastion ~]# export LOCAL_SECRET_JSON='/root/pull-secret.text'
+```
+
+Export the release mirror:
+
+```
+[root@bastion ~]# export RELEASE_NAME="ocp-release"
+```
+
+Export the type of architecture for your server, such as `x86_64`.:
+
+```
+[root@bastion ~]# export ARCHITECTURE=x86_64
+```
+
+After we have exported all these values we can start mirroring the images:
+
+```
+oc adm -a ${LOCAL_SECRET_JSON} release mirror --from=quay.io/${PRODUCT_REPO}/${RELEASE_NAME}:${OCP_RELEASE}-${ARCHITECTURE} --to=${LOCAL_REGISTRY}/${LOCAL_REPOSITORY} --to-release-image=${LOCAL_REGISTRY}/${LOCAL_REPOSITORY}:${OCP_RELEASE}-${ARCHITECTURE}
+```
+
+The output seems to be similar to this one:
+
+```
+imageContentSources:
+- mirrors:
+  - bastion:5000/ocp4/openshift4
+  source: quay.io/openshift-release-dev/ocp-release
+- mirrors:
+  - bastion:5000/ocp4/openshift4
+  source: quay.io/openshift-release-dev/ocp-v4.0-art-dev
+
+
+To use the new mirrored repository for upgrades, use the following to create an ImageContentSourcePolicy:
+
+apiVersion: operator.openshift.io/v1alpha1
+kind: ImageContentSourcePolicy
+metadata:
+  name: example
+spec:
+  repositoryDigestMirrors:
+  - mirrors:
+    - bastion:5000/ocp4/openshift4
+    source: quay.io/openshift-release-dev/ocp-release
+  - mirrors:
+    - bastion:5000/ocp4/openshift4
+    source: quay.io/openshift-release-dev/ocp-v4.0-art-dev
+```
+
+Copy this output at the end of the mirroring output and safe it in a file.
+
+Now we need to create a SSH key pair to access to use later to access the CoreOS nodes:
 
 ```
 [root@bastion ~]# ssh-keygen -t rsa -N "" -f /root/.ssh/id_rsa
 ```
 
-## Set up the ignition files with FIPS enabled
+## Set up the ignition files on fips based installation
 
 We have to create the ignition files they will be used for the installation:
 
@@ -655,36 +779,24 @@ networking:
 platform:
   none: {}
 fips: true
-pullSecret: 'GET FROM cloud.redhat.com'
+pullSecret: pullSecret: '{"auths":{"bastion:5000": {"auth": "c3R1ZGVudDpyZWRoYXQ=","email": "you@example.com"}}}'
 sshKey: 'SSH PUBLIC KEY'
 imageContentSources:
- - mirrors:
- - bastion.hX.rhaw.io:5000/<repo_name>/release
- source: quay.io/openshift-release-dev/ocp-release
 - mirrors:
+  - bastion:5000/ocp4/openshift4
+  source: quay.io/openshift-release-dev/ocp-release
+- mirrors:
+  - bastion:5000/ocp4/openshift4
+  source: quay.io/openshift-release-dev/ocp-v4.0-art-dev
 ```
 
 Please adjust this file to your needs.
 
-> The pull secret can be obtained after accessing: https://cloud.redhat.com
+> The pull secret needs to be changed regarding the values you created earlier
 > 
-> Please login with your RHNID and your password.
-> 
-> The pull secret can be found when access the following link:
-> 
-> https://cloud.redhat.com/openshift/install/metal/user-provisioned
+> The imageContentSources can be found in the output you safed after mirroring the images.
 
-
-
-Whether to enable or disable FIPS mode. By default, FIPS mode is not enabled. If FIPS mode is enabled, the Red Hat Enterprise Linux CoreOS (RHCOS) machines that OpenShift Container Platform runs on bypass the default Kubernetes cryptography suite and use the cryptography modules that are provided with RHCOS instead.
-
-```
-...
-fips: true/false
-...
-```
-
-To obtain this key please execute:
+The sshKey can be  obtained when executing:
 
 ```
 [root@bastion ~]# cat /root/.ssh/id_rsa.pub
@@ -703,6 +815,14 @@ And change into it
 ```
 [root@bastion ocp4]# cd ocp4
 ```
+
+Copy the install-config-base.yaml file into the ocp4 directory and rename it to install-config.yaml
+
+```
+[root@bastion ocp4]# cp ../install-config-base.yaml install-config.yaml
+```
+
+Don't forget to copy this file this is very important!!!
 
 Copy the install-config-base.yaml file into the ocp4 directory and rename it to install-config.yaml
 

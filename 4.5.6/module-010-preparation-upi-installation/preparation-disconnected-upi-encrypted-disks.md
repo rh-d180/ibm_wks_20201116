@@ -1,6 +1,6 @@
 # Module01:
 
-# Preparation of the installation Environment for Disconnected Installation with Disc Encryption
+# Preparation of the installation Environment
 
 ### Preface:
 
@@ -188,7 +188,7 @@ ddns-update-style interim;
          host node05 { hardware ethernet 52:54:00:f1:79:59; fixed-address 192.168.100.35; option host-name "node05.ocp4.hX.rhaw.io"; }
          host node06 { hardware ethernet 52:54:00:f1:79:60; fixed-address 192.168.100.36; option host-name "node06.ocp4.hX.rhaw.io"; }
          host node07 { hardware ethernet 52:54:00:f1:79:61; fixed-address 192.168.100.37; option host-name "node07.ocp4.hX.rhaw.io"; }
-         
+
 
 }
 ```
@@ -463,9 +463,10 @@ Now we need to configure SElinux to use custom ports in SELinux:
 ```
 [root@bastion ~]# semanage port -a 32700 -t http_port_t -p tcp
 ```
+
 ## Enabling Tang Encryption
 
-First of all we need to prepare our Bastion Node for serving Tang Service for  Network-bound disk encryption. 
+First of all we need to prepare our Bastion Node for serving Tang Service for Network-bound disk encryption.
 
 Two Tools are important for this:
 
@@ -475,13 +476,13 @@ Two Tools are important for this:
 
 ### Clevis:
 
-*Clevis* is a pluggable framework for automated decryption. In NBDE, Clevis provides automated unlocking of LUKS volumes. The **clevis** package provides the client side of the feature.
+*Clevis* is a pluggable framework for automated decryption. In NBDE, Clevis provides automated unlocking of LUKS volumes. The **clevis** package provides the client side of the feature.
 
-A *Clevis pin* is a plug-in into the Clevis framework. One of such pins is a plug-in that implements interactions with the NBDE server — Tang.
+A *Clevis pin* is a plug-in into the Clevis framework. One of such pins is a plug-in that implements interactions with the NBDE server — Tang.
 
 Clevis and Tang are generic client and server components that provide network-bound encryption. In Red Hat Enterprise Linux, they are used in conjunction with LUKS to encrypt and decrypt root and non-root storage volumes to accomplish Network-Bound Disk Encryption.
 
-Both client- and server-side components use the *José* library to perform encryption and decryption operations.
+Both client- and server-side components use the *José* library to perform encryption and decryption operations.
 
 First install both tools on your bastion node:
 
@@ -619,6 +620,7 @@ spec:
 EOF
 ```
 
+## 
 
 ## Install Local Registry
 
@@ -722,19 +724,181 @@ Now we need to add the self created certificate to the the local trust:
 
 Now we have created all of our bastion. the next step is to prepare the installation from the Openshift perspective
 
-## Configure OpenShift installer and CLI binary:
+## Configure OpenShift installer and CLI binary for disconnected Installation:
 
 From now on, unless otherwise stated, all steps will be performed on bastion.hX.rhaw.io
 
 We need to login with ssh and the username and password provided through the instructor:
 
 ```
-ssh root@bastion.hX.rhaw.io
+ssh root@bastion
 ```
 
+First of all we need to download a copy of our pull-secret in text file format. This file needs to be safed on our bastion node in /root.
+
+Then we need to convert this file into json format. For this we need the jq binary. This can be installed over rpm. 
+
+Earlier we created an username and password for our registry.
+
+Now we need to create an  base64-encoded user name and password or token for our mirror registry.
+
+```
+[root@bastion ~]# echo -n '<user_name>:<password>' | base64 -w0
 ```
 
-Now we need to create a SSH key pair to access to use later to access the CoreOS nodes
+The output when we use username=student and password=redhat should look similar to this one:
+
+```
+[root@bastion ~]# BGVtbYk3ZHAtqXs=
+```
+
+Then we need to make a copy of our downloaded pull-secret.txt  into json format:
+
+```
+cat ./pull-secret.text | jq .  > /root/pull-secret.json
+```
+
+After we have done this we need to modify the pull-secret.json with the informations of our new mirrored registry:
+
+The base file looks similar to this:
+
+```
+{
+  "auths": {
+    "cloud.openshift.com": {
+      "auth": "b3BlbnNo...",
+      "email": "you@example.com"
+    },
+    "quay.io": {
+      "auth": "b3BlbnNo...",
+      "email": "you@example.com"
+    },
+    "registry.connect.redhat.com": {
+      "auth": "NTE3Njg5Nj...",
+      "email": "you@example.com"
+    },
+    "registry.redhat.io": {
+      "auth": "NTE3Njg5Nj...",
+      "email": "you@example.com"
+    }
+  }
+}
+```
+
+Now we need to add our registry on top of this file so it looks like this:
+
+```
+{
+  "auths": {
+    "bastion:5000": {
+      "auth": "BGVtbYk3ZHAtqXs=",
+      "email": ""you@example.com"
+    },
+    "cloud.openshift.com": {
+      "auth": "b3BlbnNo...",
+      "email": "you@example.com"
+    },
+    "quay.io": {
+      "auth": "b3BlbnNo...",
+      "email": "you@example.com"
+    },
+    "registry.connect.redhat.com": {
+      "auth": "NTE3Njg5Nj...",
+      "email": "you@example.com"
+    },
+    "registry.redhat.io": {
+      "auth": "NTE3Njg5Nj...",
+      "email": "you@example.com"
+    }
+  }
+}
+```
+
+Please change the values for bastion:5000 like Hostname/Port/auth/email accordingly.
+
+For mirroring all the images we need now setup some environment variables:
+
+Export the release version:
+
+```
+[root@bastion ~]# export OCP_RELEASE=4.5.6
+```
+
+Export the local registry name and host port:
+
+```
+[root@bastion ~]# export LOCAL_REGISTRY='bastion:5000'
+```
+
+Export the local repository name:
+
+```
+[root@bastion ~]# export LOCAL_REPOSITORY='ocp4/openshift4'
+```
+
+Export the name of the repository to mirror:
+
+```
+[root@bastion ~]# export PRODUCT_REPO='openshift-release-dev'
+```
+
+For a production release, you must specify `openshift-release-dev`.
+
+Export the path to your registry pull secret:
+
+```
+ [root@bastion ~]# export LOCAL_SECRET_JSON='/root/pull-secret.text'
+```
+
+Export the release mirror:
+
+```
+[root@bastion ~]# export RELEASE_NAME="ocp-release"
+```
+
+Export the type of architecture for your server, such as `x86_64`.:
+
+```
+[root@bastion ~]# export ARCHITECTURE=x86_64
+```
+
+After we have exported all these values we can start mirroring the images:
+
+```
+oc adm -a ${LOCAL_SECRET_JSON} release mirror --from=quay.io/${PRODUCT_REPO}/${RELEASE_NAME}:${OCP_RELEASE}-${ARCHITECTURE} --to=${LOCAL_REGISTRY}/${LOCAL_REPOSITORY} --to-release-image=${LOCAL_REGISTRY}/${LOCAL_REPOSITORY}:${OCP_RELEASE}-${ARCHITECTURE}
+```
+
+The output seems to be similar to this one:
+
+```
+imageContentSources:
+- mirrors:
+  - bastion:5000/ocp4/openshift4
+  source: quay.io/openshift-release-dev/ocp-release
+- mirrors:
+  - bastion:5000/ocp4/openshift4
+  source: quay.io/openshift-release-dev/ocp-v4.0-art-dev
+
+
+To use the new mirrored repository for upgrades, use the following to create an ImageContentSourcePolicy:
+
+apiVersion: operator.openshift.io/v1alpha1
+kind: ImageContentSourcePolicy
+metadata:
+  name: example
+spec:
+  repositoryDigestMirrors:
+  - mirrors:
+    - bastion:5000/ocp4/openshift4
+    source: quay.io/openshift-release-dev/ocp-release
+  - mirrors:
+    - bastion:5000/ocp4/openshift4
+    source: quay.io/openshift-release-dev/ocp-v4.0-art-dev
+```
+
+Copy this output at the end of the mirroring output and safe it in a file.
+
+Now we need to create a SSH key pair to access to use later to access the CoreOS nodes:
 
 ```
 [root@bastion ~]# ssh-keygen -t rsa -N "" -f /root/.ssh/id_rsa
@@ -745,124 +909,6 @@ Now we need to create a SSH key pair to access to use later to access the CoreOS
 We have to create the ignition files they will be used for the installation:
 
 First we start with the install-config-base.yaml file
-
-```
-[root@bastion ~]# vim install-config-base.yaml
-```
-
-The output is something like this:
-
-```
-BGVtbYk3ZHAtqXs=
-```
-
-Now we need to make a copy in json format of the original pull secret file downloaded from cloud.redhat.com:
-
-```
-[root@bastion ~]# cat ./pull-secret.text | jq .  > /root/ocp4/pull-secret-local.text
-```
-
-The file looks similar to the example below:
-
-```
-{
-  "auths": {
-    "cloud.openshift.com": {
-      "auth": "b3BlbnNo...",
-      "email": "you@hX.rhaw.io"
-    },
-    "quay.io": {
-      "auth": "b3BlbnNo...",
-      "email": "you@hX.rhaw.io"
-    },
-    "registry.connect.redhat.com": {
-      "auth": "NTE3Njg5Nj...",
-      "email": "you@hX.rhaw.io"
-    },
-    "registry.redhat.io": {
-      "auth": "NTE3Njg5Nj...",
-      "email": "you@hX.rhaw.io"
-    }
-  }
-}
-```
-
-Now we need to edit the new file like this:
-
-```
-[root@bastion ~]# vim /root/ocp4/pull-secret-local.text
-```
-
-We just need to add a section to this file that describes the local registry:
-
-```
-"auths": {
-...
- "<bastion.hX.rhaw.io:5000": {
- "auth": "BGVtbYk3ZHAtqXs=",
- "email": "root@hX.rhaw.io"
- },
-...
-```
-
-After we have done this we need to mirror the needed images to our registry.
-
-We need to set some variables so that we can mirror the correct content:
-
-```
-[root@bastion ~]# export OCP_RELEASE=4.5.6
-```
-
-```
-[root@bastion ~]# export LOCAL_REGISTRY='bastion.hX.rhaw.io:5000'
-```
-
-```
-[root@bastion ~]# export LOCAL_REPOSITORY='ocp4/openshift4' 
-```
-
-```
-[root@bastion ~]# export PRODUCT_REPO='openshift-release-dev'
-```
-
-```
-[root@bastion ~]# export LOCAL_SECRET_JSON='/root/ocp4/pull-secret-local.text'
-```
-
-```
-[root@bastion ~]# export RELEASE_NAME="ocp-release"
-```
-
-After we have done this we can now mirror the images ... +/- 99 images.
-
-```
-[root@bastion ~]# oc adm -a ${LOCAL_SECRET_JSON} release mirror \
-     --from=quay.io/${PRODUCT_REPO}/${RELEASE_NAME}:${OCP_RELEASE} \
-     --to=${LOCAL_REGISTRY}/${LOCAL_REPOSITORY} \
-     --to-release image=${LOCAL_REGISTRY}/${LOCAL_REPOSITORY}:${OCP_RELEASE}
-```
-
-After the mirroring has been done we can create an installation program that is based on the content that we have just mirrored:
-
-```
-[root@bastion ~]# oc adm -a ${LOCAL_SECRET_JSON} release extract --command=openshift-install "${LOCAL_REGISTRY}/${LOCAL_REPOSITORY}:${OCP_RELEASE}"
-```
-
-the last step is to optain the ssh public we earlier created:
-
-```
-[root@bastion ~]# cat /root/.ssh/id_rsa.pub
-```
-
-Next we need to create the ignition files that will be used during the installation:
-
-```
-[root@bastion ~]# vim /root/ocp4/install-config-base.yaml
-```
-
-Now we need to create the install-config-base.yaml file:
-
-irst we start with the install-config-base.yaml file
 
 ```
 [root@bastion ~]# vim install-config-base.yaml
@@ -890,26 +936,24 @@ networking:
   - 172.30.0.0/16
 platform:
   none: {}
-pullSecret: 'GET FROM cloud.redhat.com'
+pullSecret: pullSecret: '{"auths":{"bastion:5000": {"auth": "c3R1ZGVudDpyZWRoYXQ=","email": "you@example.com"}}}'
 sshKey: 'SSH PUBLIC KEY'
 imageContentSources:
- - mirrors:
- - bastion.hX.rhaw.io:5000/<repo_name>/release
- source: quay.io/openshift-release-dev/ocp-release
 - mirrors:
+  - bastion:5000/ocp4/openshift4
+  source: quay.io/openshift-release-dev/ocp-release
+- mirrors:
+  - bastion:5000/ocp4/openshift4
+  source: quay.io/openshift-release-dev/ocp-v4.0-art-dev
 ```
 
 Please adjust this file to your needs.
 
-> The pull secret can be obtained after accessing: https://cloud.redhat.com
+> The pull secret needs to be changed regarding the values you created earlier
 > 
-> Please login with your RHNID and your password.
-> 
-> The pull secret can be found when access the following link:
-> 
-> https://cloud.redhat.com/openshift/install/metal/user-provisioned
+> The imageContentSources can be found in the output you safed after mirroring the images.
 
-To obtain this key please execute:
+The sshKey can be  obtained when executing:
 
 ```
 [root@bastion ~]# cat /root/.ssh/id_rsa.pub
@@ -928,6 +972,14 @@ And change into it
 ```
 [root@bastion ocp4]# cd ocp4
 ```
+
+Copy the install-config-base.yaml file into the ocp4 directory and rename it to install-config.yaml
+
+```
+[root@bastion ocp4]# cp ../install-config-base.yaml install-config.yaml
+```
+
+Don't forget to copy this file this is very important!!!
 
 Copy the install-config-base.yaml file into the ocp4 directory and rename it to install-config.yaml
 
@@ -996,16 +1048,6 @@ We have to set the value of the parameter `mastersSchedulable` from true to fals
 [root@bastion ocp4]# sed -i 's/true/false/' manifests/cluster-scheduler-02-config.yml
 ```
 
-Now we copy the two manifests for disc encryption into this manifest folder:
-
-```
-cp 99-openshift-master-encryption.yaml /root/ocp4/manifests/
-```
-
-```
-cp 99-openshift-worker-tang-encryption.yaml /root/ocp4/manifests/
-```
-
 Now we will create the ignition files:
 
 ```
@@ -1030,44 +1072,26 @@ The content of the directory ocp4 has now this content (the directoies openshift
 ├── metadata.json
 └── node.ign
 ```
-```
 
-Don't forget to copy this file this is very important!!! If this file is missing, then the creation of the ignition files will fail!!!
-
-> Everytime you recreate the ignition files you need to ensure that the ocp4 directory is empty except the install-config-base.yaml file. Very Important the .openshift_install_state.json file needs to be deleted before you recreate the ignition file. This file contains the installation certificates and can damage your installation when you use old certificates in new ignition files.
+We have to copy the files to our httpd server:
 
 ```
-[root@bastion ~]# openshift-install create ignition-configs
+[root@bastion ocp4]# mkdir -p /var/www/html/openshift4/4.5.6/ignitions
 ```
 
 ```
-drwxr-xr-x. 3 root root     195 29. Nov 18:01 .
-dr-xr-x---. 9 root root    4096 29. Nov 18:00 ..
-drwxr-xr-x. 2 root root      50 29. Nov 18:01 auth
--rw-r--r--. 1 root root  288789 29. Nov 18:01 bootstrap.ign
--rw-r--r--. 1 root root    3716 24. Nov 23:58 install-config-base.yaml
--rw-r--r--. 1 root root    1825 29. Nov 18:01 master.ign
--rw-r--r--. 1 root root      96 29. Nov 18:01 metadata.json
--rw-r--r--. 1 root root   58088 29. Nov 18:01 .openshift_install.log
--rw-r--r--. 1 root root 1190917 29. Nov 18:01 .openshift_install_state.json
--rw-r--r--. 1 root root    1825 29. Nov 18:01 node.ign
-```
-
-Now we need to copy the files to our httpd server:
-
-```
-[root@bastion ~]# mkdir -p /var/www/html/openshift4/4.2.0/ignitions
+[root@bastion ocp4]# cp -v *.ign /var/www/html/openshift4/4.5.6/ignitions/
 ```
 
 ```
-[root@bastion ~]# cp -v *.ign /var/www/html/openshift4/4.2.0/ignitions/
+[root@bastion ocp4]# chmod 644 /var/www/html/openshift4/4.5.6/ignitions/*.ign
 ```
 
 ```
-[root@bastion ~]# restorecon -RFv /var/www/html/
+[root@bastion ocp4]# restorecon -RFv /var/www/html/
 ```
 
-Now we are done with the installation and can start the initial cluster installation.
+We are done now with the installation preparation steps and can start the initial cluster installation.
 
 ```
 [root@bastion ocp4]# systemctl enable --now haproxy.service dhcpd httpd tftp named
@@ -1093,4 +1117,4 @@ Re-check again:
 [root@bastion ocp4]# systemctl status haproxy
 ```
 
-Now we are able to install our virtual machines for installing openshift cluster. The Procedure of the installation is similar to the connected installation.
+Now we are able to install an OpenShift 4 cluster onto our virtual machines.

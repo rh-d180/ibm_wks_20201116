@@ -620,8 +620,6 @@ spec:
 EOF
 ```
 
-
-
 Now we have created all of our bastion. the next step is to prepare the installation from the Openshift perspective
 
 ## Configure OpenShift installer and CLI binary:
